@@ -348,6 +348,69 @@ Client                          Server
 - [MCP Specification](https://spec.modelcontextprotocol.io)
 - [MCP Inspector](https://github.com/modelcontextprotocol/inspector)
 
+## APIM troubleshooting (Container App backend)
+
+If APIM calls time out but direct calls to the Container App FQDN work, configure APIM as follows:
+
+- Backend `serviceUrl`: `https://mcp-demo-go.graywave-b3e914df.swedencentral.azurecontainerapps.io` (public FQDN, no trailing slash, no `/mcp`).
+- API `path`: empty (`""`) so `/api/joke` maps cleanly.
+- Operations: `GET /api/joke` (backend path `/api/joke`); for MCP JSON-RPC, add `POST /mcp` (backend path `/mcp`).
+- Product: ensure the API is in a product that matches your subscription key and that the subscription is active.
+
+Test via APIM (replace with your key):
+
+```bash
+curl -i --max-time 15 \
+    -H "Ocp-Apim-Subscription-Key: <your key>" \
+    https://aigwcloud.azure-api.net/api/joke
+```
+
+## APIM + Entra ID (JWT) authentication
+
+Example working setup to secure this API via Entra ID and APIM:
+
+- APIM `serviceUrl`: `https://mcp-demo-go.graywave-b3e914df.swedencentral.azurecontainerapps.io` (no trailing slash, no `/mcp`).
+- API URL suffix: `entraid` ⇒ public base `https://aigwcloud.azure-api.net/entraid`.
+- Operations: `GET /api/joke` (backend path `/api/joke`); add `POST /mcp` for JSON-RPC if needed.
+- Subscription: optional; if disabled, only JWT is required. If enabled, send both JWT and subscription key.
+- Entra app (API resource): `api://5e52ac77-93a5-49aa-923d-a1cdeb3e7cbf` as audience.
+
+Inbound policy (APIM) used for validation:
+
+```xml
+<inbound>
+    <base />
+    <validate-jwt header-name="Authorization"
+                                failed-validation-httpcode="401"
+                                failed-validation-error-message="Unauthorized">
+        <openid-config url="https://login.microsoftonline.com/2f88d75e-5ed4-41c4-9556-e627fd1ee262/v2.0/.well-known/openid-configuration" />
+        <audiences>
+            <audience>api://5e52ac77-93a5-49aa-923d-a1cdeb3e7cbf</audience>
+        </audiences>
+        <issuers>
+            <issuer>https://sts.windows.net/2f88d75e-5ed4-41c4-9556-e627fd1ee262/</issuer>
+        </issuers>
+    </validate-jwt>
+</inbound>
+```
+
+Getting a token (scope-based):
+
+```bash
+API_APP_ID=5e52ac77-93a5-49aa-923d-a1cdeb3e7cbf
+TOKEN=$(az account get-access-token --scope api://$API_APP_ID/.default --query accessToken -o tsv)
+```
+
+Call through APIM (JWT only):
+
+```bash
+curl -i --max-time 15 \
+    -H "Authorization: Bearer $TOKEN" \
+    https://aigwcloud.azure-api.net/entraid/api/joke
+```
+
+If subscription is required, add: `-H "Ocp-Apim-Subscription-Key: <key>"`.
+
 ## License
 
 This is a demonstration project for learning purposes.
